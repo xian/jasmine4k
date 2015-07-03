@@ -54,6 +54,14 @@ class JasmineTest {
     )
   }
 
+  Test public fun testLet() {
+    val runner = JasmineRunner(javaClass<LetTest>())
+    FakeTest.log.clear()
+    assertThat(runChild("memoizes the value", runner)).containsExactly(
+        "started: memoizes the value",
+        "finished: memoizes the value")
+  }
+
   public class FakeTest() {
     companion object {
       val log = arrayListOf<String>()
@@ -95,6 +103,23 @@ class JasmineTest {
         }
 
         afterEach { log.add("final after") }
+      }
+    }
+  }
+
+  public class LetTest {
+    companion object {
+      var nextUserId = 0
+    }
+
+    init {
+      var userId = org.github.xian.jasmine.let { nextUserId++ }
+
+      describe("assigning user ids") {
+        it("memoizes the value") {
+          val firstUserId = userId()
+          assertThat(firstUserId).isEqualTo(userId())
+        }
       }
     }
   }

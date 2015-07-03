@@ -37,13 +37,19 @@ fun afterEach(fn: () -> Unit) {
   globalEnv.afterEach(fn)
 }
 
-open class JasmineRunner(clazz: Class<*>) : ParentRunner<Node>(clazz) {
-  var instance: Any? = null
+fun <T> let(fn: () -> T) : () -> T {
+  var value : T = null
+  return {
+    if (value == null) value = fn()
+    value
+  }
+}
 
+open class JasmineRunner(clazz: Class<*>) : ParentRunner<Node>(clazz) {
   override public fun getChildren(): MutableList<Node>? {
     val env = DeclareEnv()
     globalEnv = env
-    instance = newInstance()
+    newInstance()
     return env.topLevelNode.children as MutableList<Node>
   }
 
@@ -63,7 +69,13 @@ open class JasmineRunner(clazz: Class<*>) : ParentRunner<Node>(clazz) {
         if (redeclareEnv.foundFn == null) {
           throw RuntimeException("couldn't find node! ${child}")
         } else {
-          redeclareEnv.foundFn!!()
+          redeclareEnv.befores.forEach { it.invoke() }
+
+          try {
+            redeclareEnv.foundFn!!.invoke()
+          } finally {
+            redeclareEnv.afters.forEach { it.invoke() }
+          }
         }
       }
     }, child.describe(), notifier)
@@ -113,15 +125,7 @@ class RedeclareEnv(val findNodes : List<Node>) : Env {
       println("Found! ${desc}")
 
       if (currentNode == findNodes.size() - 1) {
-        foundFn = fun() {
-          befores.forEach { it.invoke() }
-
-          try {
-            fn()
-          } finally {
-            afters.forEach { it.invoke() }
-          }
-        }
+        foundFn = fn
       } else {
         currentIndex = 0
         currentNode++
@@ -133,7 +137,6 @@ class RedeclareEnv(val findNodes : List<Node>) : Env {
 
         afters.addAll(parentAfters)
       }
-      return
     } else {
       currentIndex++
     }
