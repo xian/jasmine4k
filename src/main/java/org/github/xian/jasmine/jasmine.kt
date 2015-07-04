@@ -8,10 +8,15 @@ import org.junit.runners.BlockJUnit4ClassRunner
 import org.junit.runners.ParentRunner
 import org.junit.runners.model.FrameworkMethod
 import org.junit.runners.model.Statement
+import java.io.Serializable
 import java.util.*
 import kotlin.reflect.KClass
 
 var globalEnv: Env = DeclareEnv()
+
+fun describe(clazz: KClass<*>, fn: () -> Unit) {
+  globalEnv.describe(clazz, fn)
+}
 
 fun describe(clazz: Class<*>, fn: () -> Unit) {
   globalEnv.describe(clazz, fn)
@@ -37,6 +42,11 @@ fun afterEach(fn: () -> Unit) {
   globalEnv.afterEach(fn)
 }
 
+fun <T> factory(fn: () -> T): () -> T {
+  var o: T = null
+  return { if (o == null) o = fn(); o }
+}
+
 open class JasmineRunner(clazz: Class<*>) : ParentRunner<Node>(clazz) {
   var instance: Any? = null
 
@@ -52,27 +62,40 @@ open class JasmineRunner(clazz: Class<*>) : ParentRunner<Node>(clazz) {
   }
 
   override public fun runChild(child: Node, notifier: RunNotifier?) {
-    runLeaf(object : Statement() {
-      override fun evaluate() {
-        val ancestors = child.getAncestors()
-        val redeclareEnv = RedeclareEnv(ancestors)
-        globalEnv = redeclareEnv
-        newInstance()
-        println(child.name + ":" + ancestors)
+    if (isIgnored(child)) return
 
-        if (redeclareEnv.foundFn == null) {
-          throw RuntimeException("couldn't find node! ${child}")
-        } else {
-          redeclareEnv.foundFn!!()
+    child.children.forEach { runChild(it, notifier) }
+
+    if (child.isExample()) {
+      println("*** Attempting to run ${child.name}...")
+
+      runLeaf(object : Statement() {
+        override fun evaluate() {
+          val ancestors = child.getAncestors()
+          val redeclareEnv = RedeclareEnv(ancestors)
+          globalEnv = redeclareEnv
+          newInstance()
+          println(child.name + ":" + ancestors)
+
+          if (redeclareEnv.foundFn == null) {
+            throw RuntimeException("couldn't find node! ${child}")
+          } else {
+            //            println("Will run ${child.name}!")
+            redeclareEnv.foundFn!!()
+          }
         }
-      }
-    }, child.describe(), notifier)
+      }, child.describe(), notifier)
+    }
   }
 
   private fun newInstance() = getTestClass().getJavaClass().newInstance()
 }
 
 interface Env {
+  fun describe(clazz: KClass<*>, fn: () -> Unit) {
+    describe(clazz.simpleName!!, fn)
+  }
+
   fun describe(clazz: Class<*>, fn: () -> Unit) {
     describe(clazz.getName(), fn)
   }
@@ -85,10 +108,10 @@ interface Env {
   fun afterEach(fn: () -> Unit)
 }
 
-class RedeclareEnv(val findNodes : List<Node>) : Env {
+class RedeclareEnv(val findNodes: List<Node>) : Env {
   var currentIndex = 0
   var currentNode = 1
-  var foundFn : (() -> Unit)? = null
+  var foundFn: (() -> Unit)? = null
 
   val befores = arrayListOf<() -> Unit>()
   val afters = arrayListOf<() -> Unit>()
@@ -198,7 +221,11 @@ open class Node(val name: String, val children: List<Node>, val index: Int, val 
     println("Node: ${name} index ${index}")
   }
 
-  fun describe(): Description? {
+  fun id(): String {
+    return if (parent != null) "${parent.id()}.${index}" else "${index}"
+  }
+
+  open fun describe(): Description? {
     val description = Description.createSuiteDescription(name)
     children.forEach { child -> description.addChild(child.describe()) }
     return description
@@ -218,6 +245,15 @@ open class Node(val name: String, val children: List<Node>, val index: Int, val 
   override fun toString(): String {
     return "Node: ${name} (${index})"
   }
+
+  open fun isExample() = false
 }
 
-class ExampleNode(name: String, index: Int, parent: Node? = null) : Node(name, emptyList(), index, parent)
+class ExampleNode(name: String, index: Int, parent: Node? = null) : Node(name, emptyList(), index, parent) {
+  override fun describe(): Description? {
+    val o = object : Serializable {}
+    return Description.createTestDescription("", name, java.lang.String(id()))
+  }
+
+  override fun isExample() = true
+}
